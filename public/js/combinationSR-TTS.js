@@ -22,7 +22,17 @@ recognition.lang = 'es-ES';
 recognition.interimResults = false;
 recognition.maxAlternatives = 1;
 
+const recognition2 = new SpeechRecognition();
+recognition2.continuous = false;
+recognition2.lang = 'es-ES';
+recognition2.interimResults = false;
+recognition2.maxAlternatives = 1;
+
+let usuario = window.location.href.split("/").slice(-1)[0];
+
 let comenzar_hablar = document.getElementById("convertirVoz");
+
+let comenzar_hablar2 = document.getElementById("convertirVoz2");
 
 let estado = "preguntando_nombre";
 let nombre = "";
@@ -37,14 +47,38 @@ let empezar_recognition  = () =>{
   recognition.start();
 }
 
+let empezar_recognition_2 = ()=>{
+  recognition2.start();
+}
+
+recognition2.onresult = (event) =>{
+    let comando_recibido = event.results[0][0].transcript;
+    console.log("enviando :",comando_recibido);
+    ws.send(JSON.stringify({"command":"send_message","message":comando_recibido,usuario}));  
+}
+
 comenzar_hablar.onclick = () => {
     populateVoiceList();
     comenzar_hablar.disabled = true;
     hacer_hablar_pc("hola mi nombre es agente uno ¿Cuál es tu nombre?",empezar_recognition);
 };
 
-  
+comenzar_hablar2.onclick = () => {
+  if(comenzar_hablar2.innerText=="Mandar"){
+    comenzar_hablar2.innerText = "hablando...";
+    populateVoiceList();
+    empezar_recognition_2();
+  }
+  else{
+    comenzar_hablar2.innerText = "Mandar";
+    recognition2.stop();
+  }
+};  
+
+window.recognition2  = recognition2;
+
   recognition.onresult = (event) => {
+    comenzar_hablar2.innerText = "Mandar";
     let comando_recibido = event.results[0][0].transcript;
 
     switch(estado){
@@ -93,6 +127,7 @@ comenzar_hablar.onclick = () => {
     }
 
   recognition.onspeechend = () => {
+    comenzar_hablar2.innerText = "Mandar";
     recognition.stop();
   }
 
@@ -105,19 +140,99 @@ comenzar_hablar.onclick = () => {
     console.log('Additional information: ' + event.message);
   }
 
+  let is_speaking = false;
+  let openning_mouth = true;
+
+  function speak_randomly(x,y,time){
+    
+    if(y<1 && openning_mouth ){
+      y+=0.2;
+    }
+    else if(openning_mouth){
+      openning_mouth=false;
+      y-=0.2;
+    }
+    else if(y>0 && !openning_mouth){
+      y-=0.2;
+    }
+    else{
+      y+=0.2;
+      openning_mouth=true;
+    }
+
+    mover_boca(x,y);
+
+    if(is_speaking)
+      setTimeout(()=>{speak_randomly(x,y,time)},time);
+      
+  }
+
   function hacer_hablar_pc(text,callback){
     const utterThis = new SpeechSynthesisUtterance(text);
     utterThis.audioDestination = audioprocess.mediastreamdestination.stream;
+
+    utterThis.onstart = () =>{
+        is_speaking = true;
+        speak_randomly(0,0,30);
+    }
+
 
     for (const voice of voices) {
         if (voice.name === "Google español") {
           utterThis.voice = voice;
         }
       }
-    utterThis.pitch = 1.0;
+    utterThis.pitch = 0.7;
     utterThis.rate = 1.0;
     synth.speak(utterThis); 
-    utterThis.onend = () =>{callback()};
+    utterThis.onend = () =>{
+      is_speaking = false;   
+      setTimeout(()=>mover_boca(0,0,100),200);
+      callback();
+    
+    };
 
 
   }
+
+  let prefix_websocket = "ws://";
+  if( window.location.protocol=="https:")
+    prefix_websocket= "wss://";
+
+  let ws = new WebSocket(prefix_websocket+window.location.host+"/command")
+  ws.onopen = e => {
+		ws.send(JSON.stringify({"registro":usuario}))
+	}
+	ws.onerror = error => {
+		
+	}
+
+	ws.onmessage = e => {
+    let received_data = safelyParseJSON(e.data);
+    hacer_hablar_pc(received_data.message,()=>console.log("ok"))
+	};
+
+	ws.onclose = e => {
+	};
+
+  const safelyParseJSON = (json) => {
+    let parsed = "";
+  
+    try {
+      parsed = JSON.parse(json);
+    } catch (e) {
+      console.trace("there is an error on JSON: " + json);
+    }
+  
+    return parsed;
+  }
+  
+  setTimeout(
+  ()=>{
+    populateVoiceList();
+    hacer_hablar_pc("hola",()=>console.log("ok"))
+  },
+   5000)
+  
+
+  window.ws = ws;
